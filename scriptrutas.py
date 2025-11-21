@@ -126,7 +126,7 @@ if __name__ == "__main__":
             except ValueError:
                 profundidad = 2
             
-            nombre_csv = "../proyect 5/Bases/Rutas_Json.csv"
+            nombre_csv = "../Proyect_Rips/Bases/Rutas_Json.csv"
             if not nombre_csv:
                 nombre_csv = f"archivos_json_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
             

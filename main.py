@@ -453,8 +453,8 @@ def main():
 
 
     #Remplaza para ejecución automatica 
-    rutas_datos = r"../proyect 5/Bases/Rutas_Json.csv"
-    ruta_excel = r"../proyect 5/Bases/RIPS_3.csv"
+    rutas_datos = r"../Proyect_Rips/Bases/Rutas_Json.csv"
+    ruta_excel = r"../Proyect_Rips/Bases/RIPS_3.csv"
 
     logger.info("Iniciando procesamiento con REEMPLAZO de archivos originales...")
     logger.info(f"Archivo de rutas: {rutas_datos}")
