@@ -3,7 +3,8 @@
 ## IMPORTANTE INSTALAT
 1. Visual studio code
 2. Python 
-3. libreria pandas
+4. git
+5. libreria pandas
 
 ## 📊 ESTRUCTURA DEL PROYECTO
 ├── controller/

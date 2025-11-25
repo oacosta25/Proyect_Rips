@@ -28,6 +28,8 @@ class DiagnosticCompleter:
             'cambios_num_documento_profesional': 0,
             'cambios_cod_consulta': 0,
             'cambios_tipo_diagnostico_principal': 0,
+            'cambios_tipo_doc_servicio': 0,  # NUEVO: para tipoDocumentoIdentificacion en servicios
+            'cambios_num_doc_servicio': 0,   # NUEVO: para numDocumentoIdentificacion en servicios
             'errores': []
         }
     
@@ -220,22 +222,65 @@ class DiagnosticCompleter:
             'num_doc_profesional': None
         }
         
-        # Mapeo de posibles nombres de columnas (case insensitive)
-        column_patterns = {
-            'tipo_doc': ['tipo.*doc.*identificacion', 'tipodocumento', 'tipo_doc'],
-            'num_doc': ['num.*doc.*identificacion', 'numerodocumento', 'num_doc', 'documento'],
-            'cod_diagnostico': ['cod.*diagnostico.*principal', 'codigodiagnostico', 'cod_diag', 'diagnostico'],
-            'tipo_doc_profesional': ['tipo.*doc.*profesional', 'tipodocumentoprofesional'],
-            'num_doc_profesional': ['num.*doc.*profesional', 'numerodocumentoprofesional']
+        # Set para rastrear columnas ya asignadas
+        columnas_asignadas = set()
+        
+        # PASO 1: Asignar columnas profesionales primero (más específicas)
+        profesional_patterns = {
+            'tipo_doc_profesional': [
+                'tipodocumentoidentificacionprofesional',
+                'tipodocumentoprofesional',
+                '^tipo.*documento.*profesional$'
+            ],
+            'num_doc_profesional': [
+                'numdocumentoidentificacionprofesional', 
+                'numerodocumentoprofesional',
+                '^num.*documento.*profesional$',
+                '^numero.*documento.*profesional$'
+            ]
         }
         
         for col in columns:
             col_lower = col.lower().strip()
-            for key, patterns in column_patterns.items():
-                if col_mapping[key] is None:  # Si no se ha encontrado aún
+            for key, patterns in profesional_patterns.items():
+                if col_mapping[key] is None and col not in columnas_asignadas:
                     for pattern in patterns:
                         if re.search(pattern, col_lower):
                             col_mapping[key] = col
+                            columnas_asignadas.add(col)
+                            break
+        
+        # PASO 2: Asignar columnas del paciente (menos específicas)
+        paciente_patterns = {
+            'tipo_doc': [
+                'tipodocumentoidentificacion',
+                'tipodocumento',  # SIN identificacion
+                'tipo_doc',
+                '^tipodoc$'
+            ],
+            'num_doc': [
+                'numerodocumento',
+                'numdocumento',
+                'num_doc',
+                '^documento$'
+            ],
+            'cod_diagnostico': [
+                'coddiagnosticoprincipal',  # Más específico primero
+                'coddiagnostico',            # Luego cod+diagnostico
+                'codigodiagnostico',
+                'cod_diag'
+                # NO incluir '^diagnostico$' solo - es demasiado genérico
+            ]
+        }
+        
+        for col in columns:
+            col_lower = col.lower().strip()
+            for key, patterns in paciente_patterns.items():
+                if col_mapping[key] is None and col not in columnas_asignadas:
+                    for pattern in patterns:
+                        if re.search(pattern, col_lower):
+                            col_mapping[key] = col
+                            columnas_asignadas.add(col)
                             break
         
         return col_mapping
@@ -247,15 +292,18 @@ class DiagnosticCompleter:
             num_doc = str(row[col_mapping['num_doc']]).strip()
             
             # Limpiar número de documento (solo dígitos)
-            num_doc = re.sub(r'[^0-9]', '', num_doc)
+            num_doc_limpio = re.sub(r'[^0-9]', '', num_doc)
             
-            if tipo_doc and num_doc and tipo_doc not in ['NAN', 'NONE', '']:
-                key = (tipo_doc, num_doc)
+            if tipo_doc and num_doc_limpio and tipo_doc not in ['NAN', 'NONE', '']:
+                key = (tipo_doc, num_doc_limpio)
                 
                 self.diagnosticos_dict[key] = {
                     'cod_diagnostico': str(row[col_mapping['cod_diagnostico']]).strip(),
                     'tipo_doc_profesional': str(row[col_mapping['tipo_doc_profesional']]).strip() if col_mapping['tipo_doc_profesional'] else None,
-                    'num_doc_profesional': str(row[col_mapping['num_doc_profesional']]).strip() if col_mapping['num_doc_profesional'] else None
+                    'num_doc_profesional': str(row[col_mapping['num_doc_profesional']]).strip() if col_mapping['num_doc_profesional'] else None,
+                    # Agregar información del paciente para completar servicios
+                    'tipo_doc_paciente': tipo_doc,
+                    'num_doc_paciente': num_doc_limpio
                 }
     
     def _process_user_level_changes(self, usuarios: List[dict]):
@@ -424,17 +472,31 @@ class DiagnosticCompleter:
                 else:
                     logger.warning(f"      codDiagnosticoPrincipal vacío pero no hay diagnóstico disponible")
             
-            # SOLO reemplazar tipoDiagnosticoPrincipal si YA EXISTE en el JSON y está vacío/null
-            # NO agregar si no existe
-            # SOLO en consultas y medicamentos
-            if service_type in ['consultas', 'medicamentos']:
-                if 'tipoDiagnosticoPrincipal' in service:  # Solo si el campo YA existe
-                    tipo_diag = str(service.get('tipoDiagnosticoPrincipal', '')).strip()
-                    
-                    if tipo_diag in ['', '00', 'null', 'none'] or service.get('tipoDiagnosticoPrincipal') is None:
-                        service['tipoDiagnosticoPrincipal'] = '1'
-                        self.stats['cambios_tipo_diagnostico_principal'] += 1
-                        logger.info(f"      tipoDiagnosticoPrincipal reemplazado a '1' (campo existente)")
+            # Cambiar tipoDocumentoIdentificacion de NI a CC dentro del servicio
+            if 'tipoDocumentoIdentificacion' in service:
+                tipo_doc_servicio = str(service.get('tipoDocumentoIdentificacion', '')).strip().upper()
+                if tipo_doc_servicio == 'NI':
+                    service['tipoDocumentoIdentificacion'] = 'CC'
+                    self.stats['cambios_tipo_documento'] += 1
+                    logger.info(f"      tipoDocumentoIdentificacion en servicio cambiado de 'NI' a 'CC'")
+            
+            # Completar tipoDocumentoIdentificacion del servicio si está vacío o null
+            if 'tipoDocumentoIdentificacion' in service:
+                tipo_doc_servicio = str(service.get('tipoDocumentoIdentificacion', '')).strip().upper()
+                if tipo_doc_servicio in ['', 'NULL', 'NONE', '0', '00'] or service.get('tipoDocumentoIdentificacion') is None:
+                    if diagnostico_info and diagnostico_info.get('tipo_doc_paciente'):
+                        service['tipoDocumentoIdentificacion'] = diagnostico_info['tipo_doc_paciente']
+                        self.stats['cambios_tipo_doc_servicio'] += 1
+                        logger.info(f"      tipoDocumentoIdentificacion del servicio completado: {diagnostico_info['tipo_doc_paciente']}")
+            
+            # Completar numDocumentoIdentificacion del servicio si está vacío o null
+            if 'numDocumentoIdentificacion' in service:
+                num_doc_servicio = str(service.get('numDocumentoIdentificacion', '')).strip()
+                if num_doc_servicio in ['', 'NULL', 'NONE', '0', '00'] or service.get('numDocumentoIdentificacion') is None:
+                    if diagnostico_info and diagnostico_info.get('num_doc_paciente'):
+                        service['numDocumentoIdentificacion'] = diagnostico_info['num_doc_paciente']
+                        self.stats['cambios_num_doc_servicio'] += 1
+                        logger.info(f"      numDocumentoIdentificacion del servicio completado: {diagnostico_info['num_doc_paciente']}")
             
             # Procesar tipoDocumentoIdentificacionProfesional si existe
             if 'tipoDocumentoIdentificacionProfesional' in service:
@@ -484,6 +546,32 @@ class DiagnosticCompleter:
                     logger.info(f"      codDiagnosticoPrincipal completado: {diagnostico_info['cod_diagnostico']}")
                 else:
                     logger.warning(f"      codDiagnosticoPrincipal vacío pero no hay diagnóstico disponible")
+            
+            # Cambiar tipoDocumentoIdentificacion de NI a CC dentro del servicio
+            if 'tipoDocumentoIdentificacion' in service:
+                tipo_doc_servicio = str(service.get('tipoDocumentoIdentificacion', '')).strip().upper()
+                if tipo_doc_servicio == 'NI':
+                    service['tipoDocumentoIdentificacion'] = 'CC'
+                    self.stats['cambios_tipo_documento'] += 1
+                    logger.info(f"      tipoDocumentoIdentificacion en servicio cambiado de 'NI' a 'CC'")
+            
+            # Completar tipoDocumentoIdentificacion del servicio si está vacío o null
+            if 'tipoDocumentoIdentificacion' in service:
+                tipo_doc_servicio = str(service.get('tipoDocumentoIdentificacion', '')).strip().upper()
+                if tipo_doc_servicio in ['', 'NULL', 'NONE', '0', '00'] or service.get('tipoDocumentoIdentificacion') is None:
+                    if diagnostico_info and diagnostico_info.get('tipo_doc_paciente'):
+                        service['tipoDocumentoIdentificacion'] = diagnostico_info['tipo_doc_paciente']
+                        self.stats['cambios_tipo_doc_servicio'] += 1
+                        logger.info(f"      tipoDocumentoIdentificacion del servicio completado: {diagnostico_info['tipo_doc_paciente']}")
+            
+            # Completar numDocumentoIdentificacion del servicio si está vacío o null
+            if 'numDocumentoIdentificacion' in service:
+                num_doc_servicio = str(service.get('numDocumentoIdentificacion', '')).strip()
+                if num_doc_servicio in ['', 'NULL', 'NONE', '0', '00'] or service.get('numDocumentoIdentificacion') is None:
+                    if diagnostico_info and diagnostico_info.get('num_doc_paciente'):
+                        service['numDocumentoIdentificacion'] = diagnostico_info['num_doc_paciente']
+                        self.stats['cambios_num_doc_servicio'] += 1
+                        logger.info(f"      numDocumentoIdentificacion del servicio completado: {diagnostico_info['num_doc_paciente']}")
             
             # NO agregar tipoDiagnosticoPrincipal en otrosServicios
             # (Se removió esta sección intencionalmente)
@@ -585,7 +673,9 @@ class DiagnosticCompleter:
                 diagnostico_info = self.diagnosticos_dict.get(key, {
                     'cod_diagnostico': None,
                     'tipo_doc_profesional': None,
-                    'num_doc_profesional': None
+                    'num_doc_profesional': None,
+                    'tipo_doc_paciente': tipo_doc_clean if tipo_doc_clean not in ['N/A', ''] else None,
+                    'num_doc_paciente': num_doc_clean if num_doc_clean not in ['N/A', ''] else None
                 })
                 
                 # Procesar consultas, procedimientos, medicamentos
@@ -662,8 +752,9 @@ class DiagnosticCompleter:
         print(f"- Diagnósticos encontrados: {self.stats['diagnosticos_encontrados']}")
         print(f"- Cambios diagnósticos relacionados: {self.stats['cambios_diagnostico_relacionado']}")
         print(f"- Cambios codConsulta: {self.stats['cambios_cod_consulta']}")
-        print(f"- Cambios tipoDiagnosticoPrincipal: {self.stats['cambios_tipo_diagnostico_principal']}")
-        print(f"- Cambios tipo documento: {self.stats['cambios_tipo_documento']}")
+        print(f"- Cambios tipo documento (usuarios): {self.stats['cambios_tipo_documento']}")
+        print(f"- Cambios tipo documento (servicios): {self.stats['cambios_tipo_doc_servicio']}")
+        print(f"- Cambios número documento (servicios): {self.stats['cambios_num_doc_servicio']}")
         print(f"- Cambios país residencia: {self.stats['cambios_pais_residencia']}")
         
         if self.stats['errores']:
