@@ -43,6 +43,7 @@ class MultiDiagnosticCompleter:
     
     def __init__(self):
         self.diagnosticos_dict = {}
+        self.codigos_a_eliminar = set()
         self.global_stats = {
             'archivos_procesados': 0,
             'archivos_exitosos': 0,
@@ -51,6 +52,7 @@ class MultiDiagnosticCompleter:
             'total_registros_procesados': 0,
             'total_cambios_realizados': 0,
             'total_diagnosticos_encontrados': 0,
+            'total_cambios_diagnostico_relacionado': 0,
             'errores_globales': []
         }
         self.archivos_stats = []
@@ -135,6 +137,45 @@ class MultiDiagnosticCompleter:
             logger.error(traceback.format_exc())
             return []
     
+    def load_codigos_csv(self, ruta_codigos_csv: str) -> bool:
+        """
+        Carga los códigos que deben ser eliminados desde un archivo CSV
+        
+        Args:
+            ruta_codigos_csv: Ruta al archivo CSV con los códigos
+            
+        Returns:
+            bool: True si se carga correctamente, False en caso contrario
+        """
+        try:
+            logger.info(f"Cargando códigos a eliminar: {ruta_codigos_csv}")
+            
+            # Verificar que el archivo existe
+            if not os.path.exists(ruta_codigos_csv):
+                logger.warning(f"El archivo de códigos no existe: {ruta_codigos_csv}")
+                logger.warning("Se continuará sin eliminar códigos de diagnóstico relacionado")
+                return False
+            
+            # Crear una instancia temporal del completador para cargar los códigos
+            temp_completer = DiagnosticCompleter()
+            
+            if not temp_completer.load_codigos_csv(ruta_codigos_csv):
+                logger.warning("No se pudieron cargar los códigos del CSV")
+                return False
+            
+            # Transferir el conjunto de códigos
+            self.codigos_a_eliminar = temp_completer.codigos_a_eliminar.copy()
+            
+            logger.info(f"Códigos a eliminar cargados: {len(self.codigos_a_eliminar)} códigos")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error cargando códigos CSV: {e}")
+            logger.error(traceback.format_exc())
+            self.global_stats['errores_globales'].append(f"Error cargando códigos CSV: {e}")
+            return False
+    
     def load_excel_data(self, ruta_excel: str) -> bool:
         """
         Carga y procesa los datos del archivo Excel/CSV
@@ -188,140 +229,145 @@ class MultiDiagnosticCompleter:
             return False
         
         logger.info(f"Iniciando procesamiento de {len(rutas_json)} archivos JSON")
-        logger.warning(f"IMPORTANTE: Los archivos originales serán REEMPLAZADOS (se crearán backups con extensión .backup)")
+        logger.warning(f"IMPORTANTE: Los archivos originales serán REEMPLAZADOS (NO se crearán backups automáticos)")
         
         for i, ruta_json in enumerate(rutas_json, 1):
             logger.info(f"\n{'='*80}")
             logger.info(f"PROCESANDO ARCHIVO {i}/{len(rutas_json)}: {os.path.basename(ruta_json)}")
             logger.info(f"{'='*80}")
             
+            # Crear estadísticas para este archivo
             archivo_stats = {
                 'ruta': ruta_json,
                 'procesado': False,
                 'usuarios_procesados': 0,
                 'registros_procesados': 0,
                 'cambios_realizados': 0,
+                'cambios_diagnostico_relacionado': 0,
                 'errores': []
             }
             
             try:
-                # Procesar archivo individual
                 if self._process_single_json(ruta_json, archivo_stats):
                     self.global_stats['archivos_exitosos'] += 1
                     archivo_stats['procesado'] = True
-                    logger.info(f" Archivo procesado exitosamente: {os.path.basename(ruta_json)}")
                 else:
                     self.global_stats['archivos_fallidos'] += 1
-                    logger.error(f"✗ Error procesando archivo: {os.path.basename(ruta_json)}")
-                
+                    
             except Exception as e:
-                self.global_stats['archivos_fallidos'] += 1
                 error_msg = f"Error inesperado procesando {os.path.basename(ruta_json)}: {e}"
                 logger.error(error_msg)
                 logger.error(traceback.format_exc())
+                self.global_stats['archivos_fallidos'] += 1
                 archivo_stats['errores'].append(error_msg)
             
             finally:
                 self.global_stats['archivos_procesados'] += 1
+                self.global_stats['total_usuarios_procesados'] += archivo_stats['usuarios_procesados']
+                self.global_stats['total_registros_procesados'] += archivo_stats['registros_procesados']
+                self.global_stats['total_cambios_realizados'] += archivo_stats['cambios_realizados']
+                self.global_stats['total_cambios_diagnostico_relacionado'] += archivo_stats['cambios_diagnostico_relacionado']
                 self.archivos_stats.append(archivo_stats)
         
-        # Mostrar resumen final
+        # Imprimir resumen final
         self._print_final_summary()
         
         return self.global_stats['archivos_exitosos'] > 0
 
-    def _process_single_json(self, ruta_json: str, archivo_stats: dict) -> bool:
-        """Procesa un archivo JSON individual y REEMPLAZA el archivo original"""
-        
+    def _process_single_json(self, ruta_json: str, archivo_stats: Dict) -> bool:
+        """Procesa un solo archivo JSON"""
         try:
-            # Verificar archivo antes de procesar
-            logger.info(f"Verificando archivo: {ruta_json}")
+            # BACKUP COMENTADO - Si deseas crear backup, descomenta las siguientes líneas
+            # backup_path = f"{ruta_json}.backup"
+            # 
+            # if os.path.exists(backup_path):
+            #     logger.warning(f"⚠ Ya existe un backup, será sobrescrito: {backup_path}")
+            # 
+            # # Copiar archivo original a backup
+            # import shutil
+            # shutil.copy2(ruta_json, backup_path)
+            # logger.info(f"✓ Backup creado: {backup_path}")
             
-            if not os.path.exists(ruta_json):
-                error_msg = f"El archivo no existe: {ruta_json}"
-                logger.error(error_msg)
+            # Leer JSON original
+            reader = JsonReader()
+            data = reader.load_json(ruta_json)
+            
+            if not data:
+                error_msg = "Error cargando JSON"
+                logger.error(f"✗ {error_msg}")
                 archivo_stats['errores'].append(error_msg)
                 return False
             
-            file_size = os.path.getsize(ruta_json)
-            logger.info(f"Tamaño del archivo: {file_size} bytes")
-            
-            if file_size == 0:
-                error_msg = "El archivo está vacío"
-                logger.error(error_msg)
-                archivo_stats['errores'].append(error_msg)
-                return False
-            
-            # Crear instancias para este archivo
-            json_reader = JsonReader()
+            # Crear un completador para este archivo
             completer = DiagnosticCompleter()
             
-            # Cargar archivo JSON
-            logger.info("Cargando datos JSON...")
-            json_data = json_reader.load_json(ruta_json)
-            
-            if json_data is None:
-                error_msg = "Error cargando archivo JSON"
-                logger.error(error_msg)
-                archivo_stats['errores'].append(error_msg)
-                return False
-            
-            logger.info(f"JSON cargado exitosamente. Tipo: {type(json_data)}")
-            
-            # Transferir diccionario de diagnósticos al completer
+            # Transferir datos cargados
             completer.diagnosticos_dict = self.diagnosticos_dict.copy()
-            logger.info(f"Diccionario de diagnósticos transferido: {len(completer.diagnosticos_dict)} entradas")
+            completer.codigos_a_eliminar = self.codigos_a_eliminar.copy()
             
-            # Obtener información del archivo
-            users_info = json_reader.get_users_info()
-            logger.info(f"Información del JSON:")
-            logger.info(f"  - Total usuarios: {users_info.get('total_usuarios', 0)}")
-            logger.info(f"  - Usuarios válidos: {users_info.get('usuarios_validos', 0)}")
-            logger.info(f"  - Usuarios inválidos: {users_info.get('usuarios_invalidos', 0)}")
-            logger.info(f"  - Usuarios con servicios: {users_info.get('usuarios_con_servicios', 0)}")
-            logger.info(f"  - Total servicios: {users_info.get('total_servicios', 0)}")
-            logger.info(f"  - Diagnósticos vacíos: {users_info.get('diagnosticos_vacios', 0)}")
+            # Procesar cambios a nivel de usuario
+            if 'usuarios' in data:
+                completer._process_user_level_changes(data['usuarios'])
+                
+                # Procesar cada usuario
+                for usuario in data['usuarios']:
+                    completer.stats['usuarios_procesados'] += 1
+                    
+                    if 'servicios' not in usuario:
+                        continue
+                    
+                    servicios = usuario['servicios']
+                    
+                    # Obtener información de diagnóstico
+                    tipo_doc = str(usuario.get('tipoDocumentoIdentificacion', '')).strip().upper()
+                    num_doc = str(usuario.get('numDocumentoIdentificacion', '')).strip()
+                    import re
+                    num_doc_clean = re.sub(r'[^0-9]', '', num_doc)
+                    key = (tipo_doc, num_doc_clean)
+                    
+                    diagnostico_info = completer.diagnosticos_dict.get(key, {
+                        'cod_diagnostico': None,
+                        'tipo_doc_profesional': None,
+                        'num_doc_profesional': None
+                    })
+                    
+                    # Procesar cada tipo de servicio
+                    service_types = ['consultas', 'procedimientos', 'medicamentos', 'otrosServicios']
+                    
+                    for service_type in service_types:
+                        if service_type in servicios and servicios[service_type]:
+                            if service_type == 'otrosServicios':
+                                completer._process_other_services(
+                                    servicios[service_type],
+                                    diagnostico_info
+                                )
+                            else:
+                                completer._process_service_list(
+                                    servicios[service_type],
+                                    diagnostico_info,
+                                    service_type
+                                )
             
-            # Completar diagnósticos
-            logger.info("Iniciando completado de diagnósticos...")
-            if not completer.complete_diagnostics(json_data):
-                error_msg = "Error completando diagnósticos"
-                logger.error(error_msg)
-                archivo_stats['errores'].append(error_msg)
-                return False
+            # Guardar JSON modificado (REEMPLAZAR ORIGINAL)
+            import json
+            with open(ruta_json, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
             
-            # *** CAMBIO PRINCIPAL: REEMPLAZAR EL ARCHIVO ORIGINAL ***
-            logger.warning(f"  REEMPLAZANDO ARCHIVO ORIGINAL: {ruta_json}")
-            logger.info(f"   Se creará backup como: {ruta_json}.backup")
+            # Actualizar estadísticas
+            archivo_stats['usuarios_procesados'] = completer.stats['usuarios_procesados']
+            archivo_stats['registros_procesados'] = completer.stats['registros_procesados']
+            archivo_stats['cambios_realizados'] = completer.stats['cambios_realizados']
+            archivo_stats['cambios_diagnostico_relacionado'] = completer.stats['cambios_diagnostico_relacionado']
             
-            # Guardar en el archivo original (el JsonReader automáticamente crea backup)
-            if not json_reader.save_json(json_data, ruta_json):
-                error_msg = "Error guardando archivo procesado"
-                logger.error(error_msg)
-                archivo_stats['errores'].append(error_msg)
-                return False
-            
-            # Obtener estadísticas
-            stats = completer.get_stats()
-            archivo_stats['usuarios_procesados'] = stats['usuarios_procesados']
-            archivo_stats['registros_procesados'] = stats['registros_procesados']
-            archivo_stats['cambios_realizados'] = stats['cambios_realizados']
-            
-            # Actualizar estadísticas globales
-            self.global_stats['total_usuarios_procesados'] += stats['usuarios_procesados']
-            self.global_stats['total_registros_procesados'] += stats['registros_procesados']
-            self.global_stats['total_cambios_realizados'] += stats['cambios_realizados']
-            self.global_stats['total_diagnosticos_encontrados'] += stats['diagnosticos_encontrados']
-            
-            # Verificar resultados (ahora comparando con el backup)
-            backup_path = f"{ruta_json}.backup"
-            if os.path.exists(backup_path):
-                self._verify_single_file(backup_path, ruta_json)
-            else:
-                logger.warning("No se encontró archivo backup para verificación")
-            
-            logger.info(f" Archivo REEMPLAZADO exitosamente: {ruta_json}")
-            logger.info(f" Backup disponible en: {backup_path}")
+            logger.info(f"\n✓{'='*70}")
+            logger.info(f"✓ ARCHIVO PROCESADO EXITOSAMENTE")
+            logger.info(f"✓{'='*70}")
+            logger.info(f"✓ Usuarios: {archivo_stats['usuarios_procesados']}")
+            logger.info(f"✓ Registros: {archivo_stats['registros_procesados']}")
+            logger.info(f"✓ Cambios totales: {archivo_stats['cambios_realizados']}")
+            logger.info(f"✓ Cambios diagnósticos relacionados: {archivo_stats['cambios_diagnostico_relacionado']}")
+            logger.info(f"✓ Archivo original actualizado: {ruta_json}")
+            # logger.info(f"✓ Backup disponible en: {backup_path}")  # Comentado
             
             return True
             
@@ -397,30 +443,30 @@ class MultiDiagnosticCompleter:
         print(f"Total usuarios procesados: {self.global_stats['total_usuarios_procesados']}")
         print(f"Total registros procesados: {self.global_stats['total_registros_procesados']}")
         print(f"Total cambios realizados: {self.global_stats['total_cambios_realizados']}")
+        print(f"Total cambios diagnósticos relacionados: {self.global_stats['total_cambios_diagnostico_relacionado']}")
         print(f"Total diagnósticos encontrados: {self.global_stats['total_diagnosticos_encontrados']}")
         
         print(f"\n{'='*80}")
-        print(f"DETALLE POR ARCHIVO (ARCHIVOS ORIGINALES REEMPLAZADOS):")
+        print(f"DETALLE POR ARCHIVO (ARCHIVOS ORIGINALES MODIFICADOS):")
         print(f"{'='*80}")
         
         for i, archivo in enumerate(self.archivos_stats, 1):
-            status = " EXITOSO" if archivo['procesado'] else "✗ FALLIDO"
+            status = "✓ EXITOSO" if archivo['procesado'] else "✗ FALLIDO"
             nombre = os.path.basename(archivo['ruta'])
-            backup_name = f"{nombre}.backup"
             print(f"{i:2d}. {status} - {nombre}")
             print(f"    Usuarios: {archivo['usuarios_procesados']}, " +
                   f"Registros: {archivo['registros_procesados']}, " +
-                  f"Cambios: {archivo['cambios_realizados']}")
-            if archivo['procesado']:
-                print(f"    Backup: {backup_name}")
+                  f"Cambios: {archivo['cambios_realizados']}, " +
+                  f"Diag.Rel.: {archivo['cambios_diagnostico_relacionado']}")
             if archivo['errores']:
                 for error in archivo['errores']:
                     print(f"    ERROR: {error}")
 
 
-def validate_files(ruta_csv: str, ruta_excel: str) -> bool:
+def validate_files(ruta_csv: str, ruta_excel: str, ruta_codigos: str) -> bool:
     """Valida que los archivos existan"""
     errors = []
+    warnings = []
     
     if not os.path.exists(ruta_csv):
         errors.append(f"No se encuentra el archivo CSV con rutas: {ruta_csv}")
@@ -428,11 +474,20 @@ def validate_files(ruta_csv: str, ruta_excel: str) -> bool:
     if not os.path.exists(ruta_excel):
         errors.append(f"No se encuentra el archivo Excel/CSV: {ruta_excel}")
     
+    if not os.path.exists(ruta_codigos):
+        warnings.append(f"No se encuentra el archivo de códigos: {ruta_codigos}")
+        warnings.append("Se continuará sin eliminar códigos de diagnóstico relacionado")
+    
     if errors:
         logger.error("Errores de validación de archivos:")
         for error in errors:
             logger.error(f"  - {error}")
         return False
+    
+    if warnings:
+        logger.warning("Advertencias:")
+        for warning in warnings:
+            logger.warning(f"  - {warning}")
     
     return True
 
@@ -442,7 +497,8 @@ def main():
     
     print("="*80)
     print("PROCESADOR MÚLTIPLE DE CÓDIGOS DE DIAGNÓSTICO RIPS")
-    print("IMPORTANTE: ESTE PROCESO REEMPLAZARÁ LOS ARCHIVOS ORIGINALES")
+    print("⚠ IMPORTANTE: ESTE PROCESO MODIFICARÁ LOS ARCHIVOS ORIGINALES")
+    print("⚠ NO SE CREARÁN BACKUPS AUTOMÁTICOS")
     print("="*80)
     
     
@@ -450,69 +506,75 @@ def main():
     # Configurar rutas - AJUSTAR SEGÚN NECESIDAD
     #rutas_datos = input("\nIngrese la ruta del archivo CSV con las rutas de los JSON: ").strip()
     #ruta_excel = input("Ingrese la ruta del archivo Excel/CSV con diagnósticos: ").strip()
+    #ruta_codigos = input("Ingrese la ruta del archivo CSV con códigos a eliminar: ").strip()
 
 
-    #Remplaza para ejecución automatica 
+    # Reemplaza para ejecución automática 
     rutas_datos = r"../Proyect_Rips/Bases/Rutas_Json.csv"
     ruta_excel = r"../Proyect_Rips/Bases/RIPS_3.csv"
+    ruta_codigos = r"../Proyect_Rips/Bases/Codigos.csv"
 
-    logger.info("Iniciando procesamiento con REEMPLAZO de archivos originales...")
+    logger.info("Iniciando procesamiento con MODIFICACIÓN DIRECTA de archivos originales...")
     logger.info(f"Archivo de rutas: {rutas_datos}")
-    #logger.info(f"Archivo de diagnósticos: {ruta_excel}")
+    logger.info(f"Archivo de diagnósticos: {ruta_excel}")
+    logger.info(f"Archivo de códigos: {ruta_codigos}")
     
     try:
         # Verificar archivos
-        if not validate_files(rutas_datos, ruta_excel):
-            logger.error(" Validación de archivos fallida")
+        if not validate_files(rutas_datos, ruta_excel, ruta_codigos):
+            logger.error("✗ Validación de archivos fallida")
             return
         
         # Crear procesador
         processor = MultiDiagnosticCompleter()
         
+        # Cargar códigos a eliminar desde CSV
+        logger.info("✓ Cargando códigos a eliminar...")
+        processor.load_codigos_csv(ruta_codigos)
+        
         # Cargar rutas de archivos JSON desde CSV
-        logger.info(" Cargando rutas de archivos JSON...")
+        logger.info("✓ Cargando rutas de archivos JSON...")
         rutas_json = processor.load_json_paths(rutas_datos)
         
         if not rutas_json:
-            logger.error(" No se encontraron archivos JSON válidos")
+            logger.error("✗ No se encontraron archivos JSON válidos")
             return
         
-        logger.info(f" Se encontraron {len(rutas_json)} archivos JSON para procesar")
+        logger.info(f"✓ Se encontraron {len(rutas_json)} archivos JSON para procesar")
         
         # Última confirmación antes de procesar
-        print(f"\n  Se procesarán {len(rutas_json)} archivos JSON")
-        print("  Los archivos ORIGINALES serán REEMPLAZADOS")
-        print("  Se crearán backups automáticamente")
+        print(f"\n✓ Se procesarán {len(rutas_json)} archivos JSON")
+        print("⚠ Los archivos ORIGINALES serán MODIFICADOS directamente")
+        print("⚠ NO se crearán backups automáticos - Asegúrate de tener tu propio backup")
         
     
         
         # Cargar datos del Excel/CSV con diagnósticos
-        logger.info(" Cargando datos de diagnósticos...")
+        logger.info("✓ Cargando datos de diagnósticos...")
         if not processor.load_excel_data(ruta_excel):
-            logger.error(" Error cargando datos del Excel")
+            logger.error("✗ Error cargando datos del Excel")
             return
         
-        logger.info(f" Datos de diagnósticos cargados: {len(processor.diagnosticos_dict)} registros")
+        logger.info(f"✓ Datos de diagnósticos cargados: {len(processor.diagnosticos_dict)} registros")
         
         # Procesar múltiples archivos JSON
-        logger.info(" Iniciando procesamiento de archivos JSON...")
+        logger.info("✓ Iniciando procesamiento de archivos JSON...")
         if processor.process_multiple_jsons(rutas_json):
-            logger.info(" Procesamiento completado con éxito")
-            print("\n ¡PROCESAMIENTO COMPLETADO CON ÉXITO!")
-            print(" Los archivos originales han sido actualizados")
-            print(" Los backups están disponibles con extensión .backup")
+            logger.info("✓ Procesamiento completado con éxito")
+            print("\n✓ ¡PROCESAMIENTO COMPLETADO CON ÉXITO!")
+            print("✓ Los archivos originales han sido actualizados")
         else:
-            logger.error(" No se pudo procesar ningún archivo correctamente")
-            print("\n ERROR: No se pudo procesar ningún archivo correctamente")
+            logger.error("✗ No se pudo procesar ningún archivo correctamente")
+            print("\n✗ ERROR: No se pudo procesar ningún archivo correctamente")
     
     except Exception as e:
-        logger.error(f" Error crítico en main: {e}")
+        logger.error(f"✗ Error crítico en main: {e}")
         logger.error(traceback.format_exc())
-        print(f"\n ERROR CRÍTICO: {e}")
+        print(f"\n✗ ERROR CRÍTICO: {e}")
     
     finally:
-        logger.info(" Proceso finalizado")
-        print("\n Proceso finalizado. Revisa el archivo 'diagnostic_completion_debug.log' para más detalles.")
+        logger.info("✓ Proceso finalizado")
+        print("\n✓ Proceso finalizado. Revisa el archivo 'diagnostic_completion_debug.log' para más detalles.")
 
 
 if __name__ == "__main__":
