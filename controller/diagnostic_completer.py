@@ -424,13 +424,17 @@ class DiagnosticCompleter:
                 else:
                     logger.warning(f"      codDiagnosticoPrincipal vacío pero no hay diagnóstico disponible")
             
-            # Verificar y completar tipoDiagnosticoPrincipal
-            tipo_diag = str(service.get('tipoDiagnosticoPrincipal', '')).strip()
-            
-            if tipo_diag in ['', '00', 'null', 'none'] or service.get('tipoDiagnosticoPrincipal') is None:
-                service['tipoDiagnosticoPrincipal'] = '1'
-                self.stats['cambios_tipo_diagnostico_principal'] += 1
-                logger.info(f"      tipoDiagnosticoPrincipal cambiado a '1'")
+            # SOLO reemplazar tipoDiagnosticoPrincipal si YA EXISTE en el JSON y está vacío/null
+            # NO agregar si no existe
+            # SOLO en consultas y medicamentos
+            if service_type in ['consultas', 'medicamentos']:
+                if 'tipoDiagnosticoPrincipal' in service:  # Solo si el campo YA existe
+                    tipo_diag = str(service.get('tipoDiagnosticoPrincipal', '')).strip()
+                    
+                    if tipo_diag in ['', '00', 'null', 'none'] or service.get('tipoDiagnosticoPrincipal') is None:
+                        service['tipoDiagnosticoPrincipal'] = '1'
+                        self.stats['cambios_tipo_diagnostico_principal'] += 1
+                        logger.info(f"      tipoDiagnosticoPrincipal reemplazado a '1' (campo existente)")
             
             # Procesar tipoDocumentoIdentificacionProfesional si existe
             if 'tipoDocumentoIdentificacionProfesional' in service:
@@ -481,13 +485,8 @@ class DiagnosticCompleter:
                 else:
                     logger.warning(f"      codDiagnosticoPrincipal vacío pero no hay diagnóstico disponible")
             
-            # Verificar y completar tipoDiagnosticoPrincipal
-            tipo_diag = str(service.get('tipoDiagnosticoPrincipal', '')).strip()
-            
-            if tipo_diag in ['', '00', 'null', 'none'] or service.get('tipoDiagnosticoPrincipal') is None:
-                service['tipoDiagnosticoPrincipal'] = '1'
-                self.stats['cambios_tipo_diagnostico_principal'] += 1
-                logger.info(f"      tipoDiagnosticoPrincipal cambiado a '1'")
+            # NO agregar tipoDiagnosticoPrincipal en otrosServicios
+            # (Se removió esta sección intencionalmente)
             
             if 'tipoMedicamento' in service:
                 tipo_med_actual = str(service.get('tipoMedicamento', '')).strip()

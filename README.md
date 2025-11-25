@@ -1,4 +1,10 @@
 # Proyect_Rips
+
+## IMPORTANTE INSTALAT
+1. Visual studio code
+2. Python 
+3. libreria pandas
+
 ## 📊 ESTRUCTURA DEL PROYECTO
 ├── controller/
 │   ├── diagnostic_completer.py  (NO cambió - ya estaba bien)
