@@ -7,6 +7,7 @@
 ├── Bases/
 │   ├── Rutas_Json.csv           (Lista de archivos JSON)
 │   └── RIPS_3.csv               (Diagnósticos)
+│   └── Codigos.csv              (Lista de archivos con errores)
 └── diagnostic_completion_debug.log  (Se genera al ejecutar)
 
 ## ⚙️ CÓMO FUNCIONA
