@@ -544,8 +544,6 @@ def main():
         
         # Última confirmación antes de procesar
         print(f"\n✓ Se procesarán {len(rutas_json)} archivos JSON")
-        print("⚠ Los archivos ORIGINALES serán MODIFICADOS directamente")
-        print("⚠ NO se crearán backups automáticos - Asegúrate de tener tu propio backup")
         
     
         

@@ -218,6 +218,7 @@ class DiagnosticCompleter:
             'tipo_doc': None,
             'num_doc': None,
             'cod_diagnostico': None,
+            'tipo_diagnostico': None,  # NUEVO: para idTipoDiagnostico
             'tipo_doc_profesional': None,
             'num_doc_profesional': None
         }
@@ -270,6 +271,12 @@ class DiagnosticCompleter:
                 'codigodiagnostico',
                 'cod_diag'
                 # NO incluir '^diagnostico$' solo - es demasiado genérico
+            ],
+            'tipo_diagnostico': [
+                'idtipodiagnostico',
+                'tipodiagnostico',
+                'tipo_diagnostico',
+                '^idtipodiag$'
             ]
         }
         
@@ -299,6 +306,7 @@ class DiagnosticCompleter:
                 
                 self.diagnosticos_dict[key] = {
                     'cod_diagnostico': str(row[col_mapping['cod_diagnostico']]).strip(),
+                    'tipo_diagnostico': str(row[col_mapping['tipo_diagnostico']]).strip() if col_mapping['tipo_diagnostico'] else None,  # NUEVO
                     'tipo_doc_profesional': str(row[col_mapping['tipo_doc_profesional']]).strip() if col_mapping['tipo_doc_profesional'] else None,
                     'num_doc_profesional': str(row[col_mapping['num_doc_profesional']]).strip() if col_mapping['num_doc_profesional'] else None,
                     # Agregar información del paciente para completar servicios
@@ -472,6 +480,27 @@ class DiagnosticCompleter:
                 else:
                     logger.warning(f"      codDiagnosticoPrincipal vacío pero no hay diagnóstico disponible")
             
+            # Completar tipoDiagnosticoPrincipal si está vacío, 00 o null
+            if 'tipoDiagnosticoPrincipal' in service:
+                tipo_diag = str(service.get('tipoDiagnosticoPrincipal', '')).strip()
+                
+                if (tipo_diag in ['', '00', 'NULL', 'NONE', '0'] or 
+                    service.get('tipoDiagnosticoPrincipal') is None or
+                    tipo_diag.lower() in ['none', 'null', 'nan', 'nat']):
+                    
+                    if diagnostico_info and diagnostico_info.get('tipo_diagnostico'):
+                        # Si encuentra el valor en el CSV, lo usa
+                        valor_tipo_diag = str(diagnostico_info['tipo_diagnostico']).strip()
+                        valor_formateado = valor_tipo_diag.zfill(2)
+                        service['tipoDiagnosticoPrincipal'] = valor_formateado
+                        self.stats['cambios_tipo_diagnostico_principal'] += 1
+                        logger.info(f"      tipoDiagnosticoPrincipal completado desde CSV: {valor_formateado}")
+                    else:
+                        # Si NO encuentra en el CSV, usa "03" por defecto
+                        service['tipoDiagnosticoPrincipal'] = "03"
+                        self.stats['cambios_tipo_diagnostico_principal'] += 1
+                        logger.info(f"      tipoDiagnosticoPrincipal completado con valor por defecto: 03")
+            
             # Cambiar tipoDocumentoIdentificacion de NI a CC dentro del servicio
             if 'tipoDocumentoIdentificacion' in service:
                 tipo_doc_servicio = str(service.get('tipoDocumentoIdentificacion', '')).strip().upper()
@@ -532,20 +561,8 @@ class DiagnosticCompleter:
             # Procesar diagnósticos relacionados (nueva funcionalidad)
             self._process_diagnostico_relacionado(service, 'otrosServicios', idx)
             
-            # Completar codDiagnosticoPrincipal si está vacío
-            cod_diag = str(service.get('codDiagnosticoPrincipal', '')).strip()
-            
-            if (cod_diag == '' or 
-                cod_diag.lower() in ['none', 'null', 'nan', 'nat'] or 
-                cod_diag == '0'):
-                
-                if diagnostico_info and diagnostico_info.get('cod_diagnostico'):
-                    service['codDiagnosticoPrincipal'] = diagnostico_info['cod_diagnostico']
-                    self.stats['cambios_realizados'] += 1
-                    self.stats['diagnosticos_encontrados'] += 1
-                    logger.info(f"      codDiagnosticoPrincipal completado: {diagnostico_info['cod_diagnostico']}")
-                else:
-                    logger.warning(f"      codDiagnosticoPrincipal vacío pero no hay diagnóstico disponible")
+            # NO completar codDiagnosticoPrincipal en otrosServicios
+            # Este campo no debe completarse automáticamente en otrosServicios según requerimientos
             
             # Cambiar tipoDocumentoIdentificacion de NI a CC dentro del servicio
             if 'tipoDocumentoIdentificacion' in service:
@@ -573,8 +590,29 @@ class DiagnosticCompleter:
                         self.stats['cambios_num_doc_servicio'] += 1
                         logger.info(f"      numDocumentoIdentificacion del servicio completado: {diagnostico_info['num_doc_paciente']}")
             
-            # NO agregar tipoDiagnosticoPrincipal en otrosServicios
-            # (Se removió esta sección intencionalmente)
+            # Completar tipoDiagnosticoPrincipal si está vacío, 00 o null (SÍ se completa en otrosServicios)
+            if 'tipoDiagnosticoPrincipal' in service:
+                tipo_diag = str(service.get('tipoDiagnosticoPrincipal', '')).strip()
+                
+                if (tipo_diag in ['', '00', 'NULL', 'NONE', '0'] or 
+                    service.get('tipoDiagnosticoPrincipal') is None or
+                    tipo_diag.lower() in ['none', 'null', 'nan', 'nat']):
+                    
+                    if diagnostico_info and diagnostico_info.get('tipo_diagnostico'):
+                        # Si encuentra el valor en el CSV, lo usa
+                        valor_tipo_diag = str(diagnostico_info['tipo_diagnostico']).strip()
+                        valor_formateado = valor_tipo_diag.zfill(2)
+                        service['tipoDiagnosticoPrincipal'] = valor_formateado
+                        self.stats['cambios_tipo_diagnostico_principal'] += 1
+                        logger.info(f"      tipoDiagnosticoPrincipal completado desde CSV: {valor_formateado}")
+                    else:
+                        # Si NO encuentra en el CSV, usa "03" por defecto
+                        service['tipoDiagnosticoPrincipal'] = "03"
+                        self.stats['cambios_tipo_diagnostico_principal'] += 1
+                        logger.info(f"      tipoDiagnosticoPrincipal completado con valor por defecto: 03")
+            
+            # NO agregar codDiagnosticoPrincipal en otrosServicios
+            # (Pero sí se completa tipoDiagnosticoPrincipal arriba)
             
             if 'tipoMedicamento' in service:
                 tipo_med_actual = str(service.get('tipoMedicamento', '')).strip()
@@ -672,6 +710,7 @@ class DiagnosticCompleter:
                 
                 diagnostico_info = self.diagnosticos_dict.get(key, {
                     'cod_diagnostico': None,
+                    'tipo_diagnostico': None,  # NUEVO
                     'tipo_doc_profesional': None,
                     'num_doc_profesional': None,
                     'tipo_doc_paciente': tipo_doc_clean if tipo_doc_clean not in ['N/A', ''] else None,
@@ -752,6 +791,7 @@ class DiagnosticCompleter:
         print(f"- Diagnósticos encontrados: {self.stats['diagnosticos_encontrados']}")
         print(f"- Cambios diagnósticos relacionados: {self.stats['cambios_diagnostico_relacionado']}")
         print(f"- Cambios codConsulta: {self.stats['cambios_cod_consulta']}")
+        print(f"- Cambios tipo diagnóstico principal: {self.stats['cambios_tipo_diagnostico_principal']}")
         print(f"- Cambios tipo documento (usuarios): {self.stats['cambios_tipo_documento']}")
         print(f"- Cambios tipo documento (servicios): {self.stats['cambios_tipo_doc_servicio']}")
         print(f"- Cambios número documento (servicios): {self.stats['cambios_num_doc_servicio']}")
