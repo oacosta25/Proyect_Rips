@@ -561,8 +561,7 @@ class DiagnosticCompleter:
             # Procesar diagnósticos relacionados (nueva funcionalidad)
             self._process_diagnostico_relacionado(service, 'otrosServicios', idx)
             
-            # NO completar codDiagnosticoPrincipal en otrosServicios
-            # Este campo no debe completarse automáticamente en otrosServicios según requerimientos
+        
             
             # Cambiar tipoDocumentoIdentificacion de NI a CC dentro del servicio
             if 'tipoDocumentoIdentificacion' in service:
