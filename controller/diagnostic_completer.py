@@ -28,10 +28,213 @@ class DiagnosticCompleter:
             'cambios_num_documento_profesional': 0,
             'cambios_cod_consulta': 0,
             'cambios_tipo_diagnostico_principal': 0,
-            'cambios_tipo_doc_servicio': 0,  # NUEVO: para tipoDocumentoIdentificacion en servicios
-            'cambios_num_doc_servicio': 0,   # NUEVO: para numDocumentoIdentificacion en servicios
+            'cambios_tipo_doc_servicio': 0, 
+            'cambios_num_doc_servicio': 0,  
             'errores': []
         }
+    def _identify_columns(self, columns: List[str]) -> Dict[str, Optional[str]]:
+        """Identifica las columnas necesarias del archivo RIPS"""
+        col_mapping = {
+            # Campos existentes
+            'tipo_doc': None,
+            'num_doc': None,
+            'cod_diagnostico': None,
+            'tipo_diagnostico': None,
+            'tipo_doc_profesional': None,
+            'num_doc_profesional': None,
+            
+            # NUEVOS CAMPOS AGREGADOS
+            'iduser': None,
+            'isactive': None,
+            'nombre_paciente': None,
+            'nombre_profesional': None,
+            'idencounter': None,
+            'idevent': None,
+            'diagnostico': None,
+            'cups': None,
+            'cod_servicio': None,
+            'medicamento_ordenado': None,
+            'tipo_medicamento': None,
+            'fecha_ordenamiento': None
+        }
+        
+        # Set para rastrear columnas ya asignadas
+        columnas_asignadas = set()
+        
+        # Patrones de búsqueda para cada campo
+        field_patterns = {
+            # Campos existentes
+            'tipo_doc_profesional': [
+                'tipodocumentoidentificacionprofesional',
+                'tipodocumentoprofesional',
+                '^tipo.*documento.*profesional$'
+            ],
+            'num_doc_profesional': [
+                'numdocumentoidentificacionprofesional', 
+                'numerodocumentoprofesional',
+                '^num.*documento.*profesional$',
+                '^numero.*documento.*profesional$'
+            ],
+            'tipo_doc': [
+                '^tipodocumento$',
+                'tipodocumentoidentificacion',
+                '^tipo.*doc(?!.*profesional)'
+            ],
+            'num_doc': [
+                '^numerodocumento$',
+                'numdocumentoidentificacion',
+                '^num.*doc(?!.*profesional)',
+                '^numero.*doc(?!.*profesional)'
+            ],
+            'cod_diagnostico': [
+                'coddiagnostico',
+                'codigodiagnostico',
+                '^cod.*diagnostico$'
+            ],
+            'tipo_diagnostico': [
+                'idtipodiagnostico',
+                'tipodiagnostico'
+            ],
+            
+            # NUEVOS CAMPOS
+            'iduser': [
+                '^iduser$',
+                'idusuario',
+                'userid'
+            ],
+            'isactive': [
+                '^isactive$',
+                'activo',
+                'estado'
+            ],
+            'nombre_paciente': [
+                'nombrepaciente',
+                'nombre.*paciente',
+                'paciente'
+            ],
+            'nombre_profesional': [
+                'nombreprofesional',
+                'nombre.*profesional',
+                'profesional'
+            ],
+            'idencounter': [
+                '^idencounter$',
+                'encuentro',
+                'idencuentro'
+            ],
+            'idevent': [
+                '^idevent$',
+                'idevento',
+                'evento'
+            ],
+            'diagnostico': [
+                '^diagnostico$',
+                'descripciondiagnostico',
+                'desc.*diagnostico'
+            ],
+            'cups': [
+                '^cups$',
+                'codigocups'
+            ],
+            'cod_servicio': [
+                'codservicio',
+                'codigoservicio'
+            ],
+            'medicamento_ordenado': [
+                'medicamentoordenado',
+                'medicamento',
+                'nombremed'
+            ],
+            'tipo_medicamento': [
+                'tipmedicamento',
+                'tipmedicamaneto',  # Por si hay typo en el CSV
+                'tipomedicamento',
+                'tipo.*med'
+            ],
+            'fecha_ordenamiento': [
+                'fechaordenamiento',
+                'fechaorden',
+                'fecha.*orden'
+            ]
+        }
+        
+        # Asignar columnas basándose en patrones
+        for col in columns:
+            col_lower = col.lower().strip()
+            
+            for key, patterns in field_patterns.items():
+                if col_mapping[key] is None and col not in columnas_asignadas:
+                    for pattern in patterns:
+                        if re.search(pattern, col_lower):
+                            col_mapping[key] = col
+                            columnas_asignadas.add(col)
+                            logger.info(f"Columna '{col}' asignada a '{key}'")
+                            break
+                    if col_mapping[key] is not None:
+                        break
+        
+        # Validar campos obligatorios
+        campos_obligatorios = ['tipo_doc', 'num_doc', 'cod_diagnostico']
+        for campo in campos_obligatorios:
+            if col_mapping[campo] is None:
+                logger.warning(f"⚠ Campo obligatorio '{campo}' no encontrado")
+        
+        return col_mapping
+    
+    def _create_diagnostics_dict(self, df: pd.DataFrame, col_mapping: Dict[str, Optional[str]]):
+        """Crea diccionario con información de diagnósticos y campos adicionales"""
+        logger.info("Creando diccionario de diagnósticos con campos extendidos...")
+        
+        for _, row in df.iterrows():
+            tipo_doc = str(row[col_mapping['tipo_doc']]).strip().upper()
+            num_doc = str(row[col_mapping['num_doc']]).strip()
+            
+            # Limpiar número de documento (solo dígitos)
+            num_doc_limpio = re.sub(r'[^0-9]', '', num_doc)
+            
+            if tipo_doc and num_doc_limpio and tipo_doc not in ['NAN', 'NONE', '']:
+                key = (tipo_doc, num_doc_limpio)
+                
+                # Crear diccionario con todos los campos
+                self.diagnosticos_dict[key] = {
+                    # Campos existentes
+                    'cod_diagnostico': str(row[col_mapping['cod_diagnostico']]).strip() if col_mapping['cod_diagnostico'] else None,
+                    'tipo_diagnostico': str(row[col_mapping['tipo_diagnostico']]).strip() if col_mapping['tipo_diagnostico'] else None,
+                    'tipo_doc_profesional': str(row[col_mapping['tipo_doc_profesional']]).strip() if col_mapping['tipo_doc_profesional'] else None,
+                    'num_doc_profesional': str(row[col_mapping['num_doc_profesional']]).strip() if col_mapping['num_doc_profesional'] else None,
+                    'tipo_doc_paciente': tipo_doc,
+                    'num_doc_paciente': num_doc_limpio,
+                    
+                    # NUEVOS CAMPOS AGREGADOS
+                    'iduser': str(row[col_mapping['iduser']]).strip() if col_mapping['iduser'] else None,
+                    'isactive': str(row[col_mapping['isactive']]).strip() if col_mapping['isactive'] else None,
+                    'nombre_paciente': str(row[col_mapping['nombre_paciente']]).strip() if col_mapping['nombre_paciente'] else None,
+                    'nombre_profesional': str(row[col_mapping['nombre_profesional']]).strip() if col_mapping['nombre_profesional'] else None,
+                    'idencounter': str(row[col_mapping['idencounter']]).strip() if col_mapping['idencounter'] else None,
+                    'idevent': str(row[col_mapping['idevent']]).strip() if col_mapping['idevent'] else None,
+                    'diagnostico': str(row[col_mapping['diagnostico']]).strip() if col_mapping['diagnostico'] else None,
+                    'cups': str(row[col_mapping['cups']]).strip() if col_mapping['cups'] else None,
+                    'cod_servicio': str(row[col_mapping['cod_servicio']]).strip() if col_mapping['cod_servicio'] else None,
+                    'medicamento_ordenado': str(row[col_mapping['medicamento_ordenado']]).strip() if col_mapping['medicamento_ordenado'] else None,
+                    'tipo_medicamento': str(row[col_mapping['tipo_medicamento']]).strip() if col_mapping['tipo_medicamento'] else None,
+                    'fecha_ordenamiento': str(row[col_mapping['fecha_ordenamiento']]).strip() if col_mapping['fecha_ordenamiento'] else None
+                }
+                
+                # Limpiar valores 'nan', 'None', etc.
+                for field_key in self.diagnosticos_dict[key]:
+                    value = self.diagnosticos_dict[key][field_key]
+                    if value and value.upper() in ['NAN', 'NONE', 'NULL', 'NAT']:
+                        self.diagnosticos_dict[key][field_key] = None
+        
+        logger.info(f"Diccionario creado con {len(self.diagnosticos_dict)} registros")
+        
+        # Mostrar ejemplo de registro
+        if self.diagnosticos_dict:
+            ejemplo_key = list(self.diagnosticos_dict.keys())[0]
+            ejemplo_data = self.diagnosticos_dict[ejemplo_key]
+            logger.info(f"Ejemplo de registro - Key: {ejemplo_key}")
+            logger.info(f"Campos disponibles: {list(ejemplo_data.keys())}")
+            logger.info(f"Valores de ejemplo: {ejemplo_data}")
     
     def load_codigos_csv(self, ruta_codigos_csv: str) -> bool:
         """
@@ -223,7 +426,7 @@ class DiagnosticCompleter:
             'num_doc_profesional': None
         }
         
-        # Set para rastrear columnas ya asignadas
+      
         columnas_asignadas = set()
         
         # PASO 1: Asignar columnas profesionales primero (más específicas)
@@ -255,7 +458,7 @@ class DiagnosticCompleter:
         paciente_patterns = {
             'tipo_doc': [
                 'tipodocumentoidentificacion',
-                'tipodocumento',  # SIN identificacion
+                'tipodocumento', 
                 'tipo_doc',
                 '^tipodoc$'
             ],
@@ -266,11 +469,11 @@ class DiagnosticCompleter:
                 '^documento$'
             ],
             'cod_diagnostico': [
-                'coddiagnosticoprincipal',  # Más específico primero
-                'coddiagnostico',            # Luego cod+diagnostico
+                'coddiagnosticoprincipal', 
+                'coddiagnostico',           
                 'codigodiagnostico',
                 'cod_diag'
-                # NO incluir '^diagnostico$' solo - es demasiado genérico
+               
             ],
             'tipo_diagnostico': [
                 'idtipodiagnostico',
