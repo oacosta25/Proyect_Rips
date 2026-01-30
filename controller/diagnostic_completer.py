@@ -22,6 +22,7 @@ class DiagnosticCompleter:
             'cambios_finalidad_tecnologia': 0,
             'cambios_tipo_documento': 0,
             'cambios_tipo_medicamento': 0,
+            'cambios_dias_tratamiento': 0,
             'cambios_modalidad_grupo': 0,
             'cambios_pais_residencia': 0,
             'cambios_tipo_documento_profesional': 0,  
@@ -661,6 +662,7 @@ class DiagnosticCompleter:
             self._process_diagnostico_relacionado(service, service_type, idx)
             
             # Procesar finalidadTecnologiaSalud si existe
+            #Regal negocio validar y completar
             if 'finalidadTecnologiaSalud' in service:
                 finalidad_actual = str(service.get('finalidadTecnologiaSalud', '')).strip()
                 if finalidad_actual in ['', '00', 'null', 'none'] or service['finalidadTecnologiaSalud'] is None:
@@ -749,6 +751,27 @@ class DiagnosticCompleter:
                     service['numDocumentoIdentificacionProfesional'] = nuevo_valor
                     self.stats['cambios_num_documento_profesional'] += 1
                     logger.info(f"      numDocumentoIdentificacionProfesional cambiado a '{nuevo_valor}'")
+            
+            # Validar tipoMedicamento - cambiar NULL, vacío o "00" a "01"
+            if 'tipoMedicamento' in service:
+                tipo_med_actual = str(service.get('tipoMedicamento', '')).strip()
+                if tipo_med_actual in ['', '00', 'null', 'none'] or service['tipoMedicamento'] is None:
+                    service['tipoMedicamento'] = '01'
+                    self.stats['cambios_tipo_medicamento'] += 1
+                    logger.info(f"      tipoMedicamento cambiado a '01'")
+            
+            # Validar diasTratamiento - máximo 180 días
+            if 'diasTratamiento' in service:
+                try:
+                    dias_tratamiento = service.get('diasTratamiento')
+                    if dias_tratamiento is not None and dias_tratamiento != '':
+                        dias_int = int(float(str(dias_tratamiento)))
+                        if dias_int > 180:
+                            service['diasTratamiento'] = 180
+                            self.stats['cambios_dias_tratamiento'] += 1
+                            logger.info(f"      diasTratamiento cambiado de {dias_int} a 180")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"      Error convirtiendo diasTratamiento: {e}")
     
     def _process_other_services(self, other_services: List[dict], diagnostico_info: Dict):
         """Procesa la lista de otros servicios"""
@@ -829,6 +852,19 @@ class DiagnosticCompleter:
                     service['modalidadGrupoServicioTecSal'] = '01'
                     self.stats['cambios_modalidad_grupo'] += 1
                     logger.info(f"      modalidadGrupoServicioTecSal cambiado a '01'")
+            
+            # Validar diasTratamiento - máximo 180 días
+            if 'diasTratamiento' in service:
+                try:
+                    dias_tratamiento = service.get('diasTratamiento')
+                    if dias_tratamiento is not None and dias_tratamiento != '':
+                        dias_int = int(float(str(dias_tratamiento)))
+                        if dias_int > 180:
+                            service['diasTratamiento'] = 180
+                            self.stats['cambios_dias_tratamiento'] += 1
+                            logger.info(f"      diasTratamiento cambiado de {dias_int} a 180")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"      Error convirtiendo diasTratamiento: {e}")
 
     def debug_matching(self):
         """Función para debuggear el matching de datos"""
@@ -997,6 +1033,8 @@ class DiagnosticCompleter:
         print(f"- Cambios tipo documento (usuarios): {self.stats['cambios_tipo_documento']}")
         print(f"- Cambios tipo documento (servicios): {self.stats['cambios_tipo_doc_servicio']}")
         print(f"- Cambios número documento (servicios): {self.stats['cambios_num_doc_servicio']}")
+        print(f"- Cambios tipo medicamento: {self.stats['cambios_tipo_medicamento']}")
+        print(f"- Cambios días tratamiento (máx. 180): {self.stats['cambios_dias_tratamiento']}")
         print(f"- Cambios país residencia: {self.stats['cambios_pais_residencia']}")
         
         if self.stats['errores']:
