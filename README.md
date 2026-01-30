@@ -3,8 +3,8 @@
 ## IMPORTANTE INSTALAT
 1. Visual studio code
 2. Python 
-4. git
-5. libreria pandas
+4. libreria pandas - comando: pip install pandas
+5. Git - para actualización  comando: git pull 
 
 ## 📊 ESTRUCTURA DEL PROYECTO
 ├── controller/
