@@ -1,8 +1,8 @@
 # Proyect_Rips
 
-## IMPORTANTE INSTALAT
+## IMPORTANTE INSTALAR
 1. Visual studio code
-2. Python 
+2. Python 3.13
 4. libreria pandas - comando: pip install pandas
 5. Git - para actualización  comando: git pull 
 
